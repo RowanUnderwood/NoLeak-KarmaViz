@@ -284,6 +284,21 @@ class KarmaVisualizer:
             self.current_waveform_index = 0
             logger.error("No waveforms found!")
 
+        def _try_compile_main_shader(waveform_name, warp_map_name):
+            fragment_shader_with_waveform = (
+                self.shader_manager.build_full_fragment_shader(
+                    waveform_name=waveform_name,
+                    warp_map_name=warp_map_name,
+                )
+            )
+            program = self.ctx.program(
+                vertex_shader=VERTEX_SHADER,
+                fragment_shader=fragment_shader_with_waveform,
+            )
+            self.current_waveform_name = waveform_name
+            self.active_warp_map_name = warp_map_name
+            return program
+
         # Use pre-compiled programs from splash screen
         if compiled_programs and "main" in compiled_programs:
             self.program = compiled_programs["main"]
@@ -291,31 +306,42 @@ class KarmaVisualizer:
         else:
             # Compile main shader
             logger.debug("Compiling main shader...")
-            try:
-                logger.debug("Selecting random warp map...")
-                self.cycle_to_random_warp_map()
-                logger.debug(f"Selected warp map: {self.active_warp_map_name}")
-                
-                logger.debug("Cycling GPU waveform...")
-                self.cycle_gpu_waveform()
-                logger.debug(f"Selected waveform: {self.current_waveform_name}")
-                
-                logger.debug("Building fragment shader...")
-                fragment_shader_with_waveform = (
-                    self.shader_manager.build_full_fragment_shader(
-                        waveform_name=self.current_waveform_name,
-                        warp_map_name=self.active_warp_map_name,
+            logger.debug("Selecting random warp map...")
+            self.cycle_to_random_warp_map()
+            logger.debug(f"Selected warp map: {self.active_warp_map_name}")
+
+            logger.debug("Cycling GPU waveform...")
+            self.cycle_gpu_waveform()
+            logger.debug(f"Selected waveform: {self.current_waveform_name}")
+
+            # Fall back through progressively safer combinations rather than
+            # crashing outright if the randomly picked waveform/warp map has
+            # broken GLSL (e.g. missing a function the shader template expects).
+            fallback_attempts = [
+                (self.current_waveform_name, self.active_warp_map_name),
+                ("normal", self.active_warp_map_name),
+                ("normal", None),
+            ]
+            self.program = None
+            last_error = None
+            for waveform_name, warp_map_name in fallback_attempts:
+                try:
+                    logger.debug(
+                        f"Building fragment shader (waveform={waveform_name}, warp_map={warp_map_name})..."
                     )
-                )
-                logger.debug("Creating program with shaders...")
-                self.program = self.ctx.program(
-                    vertex_shader=VERTEX_SHADER,
-                    fragment_shader=fragment_shader_with_waveform,
-                )
-                logger.debug(f"Main shader compiled successfully with waveform: {self.current_waveform_name}")
-            except Exception as e:
-                logger.error(f"Failed to compile main shader: {e}")
-                raise RuntimeError("Main shader compilation failed")
+                    self.program = _try_compile_main_shader(waveform_name, warp_map_name)
+                    logger.debug(
+                        f"Main shader compiled successfully with waveform: {waveform_name}"
+                    )
+                    break
+                except Exception as e:
+                    last_error = e
+                    logger.error(
+                        f"Failed to compile main shader (waveform={waveform_name}, warp_map={warp_map_name}): {e}"
+                    )
+
+            if self.program is None:
+                raise RuntimeError("Main shader compilation failed") from last_error
 
         # Add debug logging for program uniforms
         try:
