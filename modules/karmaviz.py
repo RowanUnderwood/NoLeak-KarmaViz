@@ -253,8 +253,13 @@ class KarmaVisualizer:
         # Initialize waveform cycling index
         self.warp_map_manager = WarpMapManager()
         self.shader_compiler = ShaderCompiler(self.ctx, self.warp_map_manager)
+        # enable_shared_contexts=False: workers only prepare shader source and
+        # the main thread compiles it (which it always did anyway). Compiling a
+        # validation copy in each worker's standalone GL context leaked ~1 GPU
+        # buffer + ~900 KB per compile on Mesa/iris, even with release() --
+        # two compiles per beat transition, ~11 GB after a day of running.
         self.threaded_shader_compiler = ThreadedShaderCompiler(
-            self.ctx, self.warp_map_manager, max_workers=2, enable_shared_contexts=True
+            self.ctx, self.warp_map_manager, max_workers=2, enable_shared_contexts=False
         )
         self.shader_manager = ShaderManager(
             warp_map_manager=self.warp_map_manager,
@@ -2606,6 +2611,8 @@ class KarmaVisualizer:
 
             # Update program and VAO
             self.program = new_program
+            if getattr(self, "vao", None):
+                self.vao.release()
             self.vao = self.ctx.vertex_array(
                 self.program,
                 [(self.vbo, "2f 2f", "in_position", "in_texcoord")],

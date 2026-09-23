@@ -114,7 +114,10 @@ class ThreadedShaderCompiler:
 
         # Compilation tracking
         self.active_requests: Dict[str, CompilationRequest] = {}
+        # Bounded: results are consumed within a frame or two, but nothing ever
+        # removed them, so every result (with both shader sources) piled up.
         self.completed_results: Dict[str, CompilationResult] = {}
+        self.max_completed_results = 64
 
         # Start worker threads
         self._start_workers()
@@ -136,9 +139,10 @@ class ThreadedShaderCompiler:
     def _worker_thread(self, worker_id: int) -> None:
         """Worker thread that processes shader compilation requests."""
         thread_ctx = None
-        # Create independent context
+        # Create independent context (only needed for in-thread validation)
         try:
-            thread_ctx = self._create_shared_context(worker_id)
+            if self.enable_shared_contexts:
+                thread_ctx = self._create_shared_context(worker_id)
             if thread_ctx:
                 self.logger.debug(f"Worker {worker_id}: Created independent OpenGL context")
             else:
@@ -172,6 +176,7 @@ class ThreadedShaderCompiler:
                 # Store result
                 with self.lock:
                     self.completed_results[request.request_id] = result
+                    self._prune_completed_results()
                     if request.request_id in self.active_requests:
                         del self.active_requests[request.request_id]
 
@@ -194,6 +199,7 @@ class ThreadedShaderCompiler:
                     # Store error result
                     with self.lock:
                         self.completed_results[request.request_id] = error_result
+                        self._prune_completed_results()
                         if request.request_id in self.active_requests:
                             del self.active_requests[request.request_id]
 
@@ -214,6 +220,11 @@ class ThreadedShaderCompiler:
                 self.logger.debug(f"🧹 Worker {worker_id}: Cleaning up independent context")
             except Exception as e:
                 self.logger.debug(f"Worker {worker_id}: Error cleaning up context: {e}")
+
+    def _prune_completed_results(self) -> None:
+        """Drop the oldest completed results beyond the cap. Caller holds self.lock."""
+        while len(self.completed_results) > self.max_completed_results:
+            del self.completed_results[next(iter(self.completed_results))]
 
     def _create_shared_context(self, worker_id: int) -> Optional[moderngl.Context]:
         """Create a shared OpenGL context for a worker thread.
@@ -293,11 +304,17 @@ class ThreadedShaderCompiler:
                 from shaders.shaders import FRAGMENT_SHADER
                 fragment_shader_source = FRAGMENT_SHADER
             
-            # Compile the program using the shared context
+            # Compile the program using the shared context. This is validation
+            # only: the main thread recompiles from source in its own context
+            # (compile_on_main_thread), so release this copy right away. Note
+            # that on Mesa/iris each compile here still leaks ~1 GPU buffer even
+            # after release(), which is why KarmaVisualizer disables this mode.
             program = ctx.program(
                 vertex_shader=vertex_shader_source,
                 fragment_shader=fragment_shader_source,
             )
+            program.release()
+            program = None
             
             end_time = time.perf_counter()
             compilation_time = end_time - start_time

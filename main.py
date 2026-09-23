@@ -795,6 +795,10 @@ def main():
                                     log_debug(f"[DEBUG] Failed to copy {uniform_name}: {e}")
 
                         vis.program = new_program
+
+                        if getattr(vis, "vao", None):
+
+                            vis.vao.release()
                         vis.vao = vis.ctx.vertex_array(
                             vis.program, [(vis.vbo, "2f 2f", "in_position", "in_texcoord")]
                         )
@@ -844,6 +848,10 @@ def main():
                                     log_debug(f"[DEBUG] Failed to copy {uniform_name}: {e}")
 
                         vis.program = new_program
+
+                        if getattr(vis, "vao", None):
+
+                            vis.vao.release()
                         vis.vao = vis.ctx.vertex_array(
                             vis.program, [(vis.vbo, "2f 2f", "in_position", "in_texcoord")]
                         )
@@ -925,6 +933,10 @@ def main():
                                     log_debug(f"[DEBUG] Failed to copy {uniform_name}: {e}")
 
                         vis.program = new_program
+
+                        if getattr(vis, "vao", None):
+
+                            vis.vao.release()
                         vis.vao = vis.ctx.vertex_array(
                             vis.program,
                             [(vis.vbo, "2f 2f", "in_position", "in_texcoord")],
@@ -1011,6 +1023,10 @@ def main():
                                     log_debug(f"[DEBUG] Failed to copy {uniform_name}: {e}")
 
                         vis.program = new_program
+
+                        if getattr(vis, "vao", None):
+
+                            vis.vao.release()
                         vis.vao = vis.ctx.vertex_array(
                             vis.program,
                             [(vis.vbo, "2f 2f", "in_position", "in_texcoord")],
