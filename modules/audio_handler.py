@@ -156,7 +156,13 @@ class AudioProcessor:
                 dtype=self.data_format,
                 blocksize=self.chunk_size,
                 device=self.device,
-                latency="low",
+                # One block of latency, not "low": PipeWire runs the whole graph
+                # at the smallest latency any client requests, and "low" (~10 ms)
+                # dragged it to a 256-sample quantum, starving heavier DSP nodes
+                # (easyeffects auto-gain) into xruns/audible dropouts. A visualizer
+                # reading 1024-sample blocks gains nothing from a shorter buffer.
+                # Floor of 1024 frames so a smaller chunk_size setting can't undo it.
+                latency=max(self.chunk_size, 1024) / self.sample_rate,
                 dither_off=True,  # Turn off dithering to reduce CPU load
             )
             return stream

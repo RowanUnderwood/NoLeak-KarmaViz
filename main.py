@@ -6,6 +6,7 @@ Main entry point for the application
 
 import pygame
 import sys
+import json
 import os
 import argparse
 from PyQt5.QtWidgets import QApplication
@@ -607,6 +608,10 @@ def main():
 
         # Initialize Pygame
         pygame.init()
+        # KarmaViz never plays sound, but pygame.init() opens an SDL audio output
+        # stream with a ~5 ms latency request that pins PipeWire's graph quantum
+        # low for every other client. Close it.
+        pygame.mixer.quit()
 
         # Set window for taskbar display
         try:
@@ -687,7 +692,20 @@ def main():
                 log_info("Note: To capture system audio, you may need to set up a loopback device.")
                 log_info("See README for instructions on setting up system audio capture.")
             
-            audio_processor = AudioProcessor()
+            # Open the saved input device straight away. It used to start on the
+            # default device and switch once the config menu applied settings,
+            # which is late enough that a launcher (Jockey) can SIGSTOP the
+            # process in between, leaving a stalled default-device capture node
+            # that xruns every PipeWire cycle until resumed.
+            saved_device = None
+            try:
+                with open(os.path.expanduser("~/.config/KarmaViz/settings.json")) as f:
+                    saved_device = json.load(f).get("audio_device")
+            except (OSError, ValueError):
+                pass
+            if saved_device not in [d["id"] for d in devices] + [d["name"] for d in devices]:
+                saved_device = None  # unavailable now; the config menu's own handling still applies
+            audio_processor = AudioProcessor(device=saved_device)
             audio_processor.start()
             log_debug("Audio processor started successfully")
         except Exception as e:
